@@ -193,7 +193,7 @@ const ONBOARDING_QS = [
 /* ═══════════════════════════════════════════════════════════════
    HELPERS
 ═══════════════════════════════════════════════════════════════ */
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 const today   = () => new Date().toISOString().slice(0,10);
 const fmtDate = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { day:'numeric', month:'short' });
@@ -564,6 +564,23 @@ function RutinaTab({ training, setTraining }) {
   const editExercise   = (exId,updated) => updateDay(selDay.id,{exercises:selDay.exercises.map(e=>e.id===exId?updated:e)});
   const deleteExercise = (exId)         => updateDay(selDay.id,{exercises:selDay.exercises.filter(e=>e.id!==exId)});
 
+  const linkExercises = (idA, idB) => {
+    const exs = selDay.exercises;
+    const eA = exs.find(e=>e.id===idA), eB = exs.find(e=>e.id===idB);
+    const ssId = eA?.supersetId || eB?.supersetId || 'ss-'+uid();
+    updateDay(selDay.id, { exercises: exs.map(e=>e.id===idA||e.id===idB?{...e,supersetId:ssId}:e) });
+  };
+  const unlinkExercise = (id) => {
+    const exs = selDay.exercises;
+    const target = exs.find(e=>e.id===id);
+    if (!target?.supersetId) return;
+    const ssId = target.supersetId;
+    let newExs = exs.map(e=>e.id===id?{...e,supersetId:null}:e);
+    if (newExs.filter(e=>e.supersetId===ssId).length===1)
+      newExs = newExs.map(e=>e.supersetId===ssId?{...e,supersetId:null}:e);
+    updateDay(selDay.id, { exercises:newExs });
+  };
+
   return (
     <>
       <Screen>
@@ -617,13 +634,41 @@ function RutinaTab({ training, setTraining }) {
             <SecTitle eyebrow="Ejercicios" action={
               <button onClick={()=>setShowAddEx(true)} style={{ background:'transparent', border:'none', color:'var(--accent)', fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontFamily:'var(--sans)' }}><I.Plus sz={14} st={2}/>Agregar</button>
             }>Día {selDay.letter} · Plan</SecTitle>
-            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              {selDay.exercises.map((e,i)=>(
-                <ExRow key={e.id} ex={e} num={i+1}
-                  onDelete={()=>deleteExercise(e.id)}
-                  onEdit={updated=>editExercise(e.id,updated)}
-                />
-              ))}
+            <div style={{ display:'flex', flexDirection:'column' }}>
+              {selDay.exercises.map((e,i)=>{
+                const next = selDay.exercises[i+1];
+                const linked    = e.supersetId && next?.supersetId === e.supersetId;
+                const isFirst   = e.supersetId && (i===0 || selDay.exercises[i-1]?.supersetId !== e.supersetId);
+                const isInGroup = !!e.supersetId;
+                return (
+                  <React.Fragment key={e.id}>
+                    {/* Superserie badge — once before the first of the group */}
+                    {isFirst && (
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:5, paddingLeft:6 }}>
+                        <div style={{ width:3, height:14, borderRadius:999, background:'var(--accent)', flexShrink:0 }}/>
+                        <span style={{ fontFamily:'var(--mono)', fontSize:10.5, color:'var(--accent)', letterSpacing:'0.1em', textTransform:'uppercase' }}>Superserie</span>
+                      </div>
+                    )}
+                    {/* Exercise row */}
+                    <div style={{ marginLeft:isInGroup?14:0, paddingLeft:isInGroup?10:0, borderLeft:isInGroup?'2px solid rgba(217,119,87,.28)':'none', marginBottom:linked?3:8 }}>
+                      <ExRow ex={e} num={i+1}
+                        onDelete={()=>deleteExercise(e.id)}
+                        onEdit={updated=>editExercise(e.id,updated)}
+                        onUnlink={isInGroup?()=>unlinkExercise(e.id):null}
+                      />
+                    </div>
+                    {/* Between exercises: link button or connector gap */}
+                    {next && !linked && (
+                      <div style={{ marginBottom:8 }}>
+                        <button onClick={()=>linkExercises(e.id, next.id)}
+                          style={{ display:'flex', alignItems:'center', gap:4, background:'transparent', border:'none', color:'var(--text-muted)', fontSize:11.5, cursor:'pointer', padding:'1px 0 1px 6px', fontFamily:'var(--sans)', opacity:0.65 }}>
+                          <I.Plus sz={11} st={2}/>Agrupar con siguiente
+                        </button>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
             </div>
             {selDay.exercises.length===0&&<div style={{ padding:'40px 0', textAlign:'center', color:'var(--text-muted)', fontSize:14 }}>Sin ejercicios todavía.<br/>Agregá el primero arriba.</div>}
           </div>
@@ -656,7 +701,7 @@ function RutinaTab({ training, setTraining }) {
   );
 }
 
-function ExRow({ ex, num, onDelete, onEdit }) {
+function ExRow({ ex, num, onDelete, onEdit, onUnlink }) {
   const weights = S.getWeights();
   const lastW = weights[ex.id] ?? ex.defaultWeight;
   const [showEdit, setShowEdit] = useState(false);
@@ -670,7 +715,10 @@ function ExRow({ ex, num, onDelete, onEdit }) {
         </div>
         <div style={{ textAlign:'right', flexShrink:0 }}>
           <div style={{ fontFamily:'var(--mono)', fontSize:14, color:'var(--text)' }}>{lastW}<span style={{ fontSize:10, color:'var(--text-muted)', marginLeft:2 }}>kg</span></div>
-          <button onClick={onDelete} style={{ marginTop:4, background:'transparent', border:'none', color:'var(--text-muted)', cursor:'pointer', padding:0 }}><I.Trash sz={13}/></button>
+          <div style={{ marginTop:4, display:'flex', gap:8, justifyContent:'flex-end', alignItems:'center' }}>
+            {onUnlink && <button onClick={onUnlink} style={{ background:'transparent', border:'none', color:'var(--accent)', cursor:'pointer', padding:0, fontSize:10, fontFamily:'var(--sans)', opacity:0.8 }}>separar</button>}
+            <button onClick={onDelete} style={{ background:'transparent', border:'none', color:'var(--text-muted)', cursor:'pointer', padding:0 }}><I.Trash sz={13}/></button>
+          </div>
         </div>
       </div>
       {showEdit && <EditExerciseModal ex={ex} onClose={()=>setShowEdit(false)} onSave={updated=>{ onEdit(updated); setShowEdit(false); }}/>}
@@ -772,22 +820,60 @@ function EditDayModal({ day, onClose, onSave, onDelete }) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   TRAINING HELPERS
+═══════════════════════════════════════════════════════════════ */
+// Group flat exercise array into execution blocks.
+// A superset = consecutive exercises sharing the same supersetId.
+function buildBlocks(routine) {
+  const result = [];
+  let i = 0;
+  while (i < routine.length) {
+    const ex = routine[i];
+    if (!ex.supersetId) {
+      result.push({ id:'b-'+ex.id, type:'single', exercises:[ex], sets:ex.sets, restSec:ex.restSec });
+      i++;
+    } else {
+      const grp = [ex];
+      let j = i+1;
+      while (j < routine.length && routine[j].supersetId === ex.supersetId) { grp.push(routine[j]); j++; }
+      result.push({ id:ex.supersetId, type:'superset', exercises:grp, sets:ex.sets, restSec:grp[grp.length-1].restSec });
+      i = j;
+    }
+  }
+  return result;
+}
+
+function getExSets(exId, blocks, rounds) {
+  for (const b of blocks) {
+    if (b.exercises.some(e=>e.id===exId)) return rounds[b.id]||0;
+  }
+  return 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    TRAINING MODE
 ═══════════════════════════════════════════════════════════════ */
-function TrainingMode({ routine, onExit, onSave }) {
+function TrainingMode({ routine, dayLabel, onExit, onSave }) {
   const savedWeights = S.getWeights();
-  const [exIdx,  setExIdx]  = useState(0);
-  const [done,   setDone]   = useState({});
-  const [wts,    setWts]    = useState(()=>Object.fromEntries(routine.map(e=>[e.id, savedWeights[e.id]??e.defaultWeight])));
-  const [timer,  setTimer]  = useState(null);
-  const [elapsed,setEl]     = useState(0);
-  const [fin,    setFin]    = useState(false);
+  const blocks  = useMemo(()=>buildBlocks(routine), []);
 
-  const ex = routine[exIdx];
-  const doneThis = done[ex.id]||0;
-  const totalEx  = routine.length;
-  const overDone  = routine.reduce((a,e)=>a+(done[e.id]||0),0);
-  const overTotal = routine.reduce((a,e)=>a+e.sets,0);
+  const [blockIdx, setBlockIdx] = useState(0);
+  const [subIdx,   setSubIdx]   = useState(0);   // position within superset
+  const [rounds,   setRounds]   = useState({});   // full rounds completed per block.id
+  const [wts,      setWts]      = useState(()=>Object.fromEntries(routine.map(e=>[e.id, savedWeights[e.id]??e.defaultWeight])));
+  const [timer,    setTimer]    = useState(null);
+  const [elapsed,  setEl]       = useState(0);
+  const [fin,      setFin]      = useState(false);
+
+  const block      = blocks[blockIdx];
+  const curEx      = block.exercises[subIdx];
+  const blockRnd   = rounds[block.id]||0;
+  const isSuperset = block.type === 'superset';
+  const isMidBlock = isSuperset && subIdx < block.exercises.length-1;
+  const blockDone  = blockRnd >= block.sets;
+
+  const totalRounds = blocks.reduce((a,b)=>a+b.sets,0);
+  const doneRounds  = blocks.reduce((a,b)=>a+(rounds[b.id]||0),0);
 
   useEffect(()=>{ const t=setInterval(()=>setEl(s=>s+1),1000); return()=>clearInterval(t); },[]);
   useEffect(()=>{
@@ -796,59 +882,95 @@ function TrainingMode({ routine, onExit, onSave }) {
     return()=>clearTimeout(t);
   },[timer]);
 
-  const completeSet=()=>{
-    if(doneThis>=ex.sets) return;
-    setDone(d=>({...d,[ex.id]:(d[ex.id]||0)+1}));
-    setTimer({ left:ex.restSec, total:ex.restSec });
+  const completeStep = () => {
+    if (isMidBlock) {
+      // Move to next exercise in superset — no rest
+      setSubIdx(s=>s+1);
+    } else {
+      // Completed one full round of this block
+      const newRnd = (rounds[block.id]||0)+1;
+      setRounds(r=>({...r,[block.id]:newRnd}));
+      if (newRnd < block.sets) {
+        setTimer({left:block.restSec, total:block.restSec});
+        setSubIdx(0); // restart superset from first exercise
+      }
+      // if newRnd >= block.sets: show "Siguiente" (blockDone = true)
+    }
   };
-  const next=()=>{ exIdx<totalEx-1?(setExIdx(i=>i+1),setTimer(null)):setFin(true); };
-  const prev=()=>{ if(exIdx>0){setExIdx(i=>i-1);setTimer(null);} };
-  const adj=(d)=>setWts(w=>({...w,[ex.id]:Math.max(0,+((w[ex.id]||0)+d).toFixed(2))}));
 
-  const handleFinish=()=>{
-    const session={ id:uid(), date:today(), duration:elapsed, exercises:routine.map(e=>({ id:e.id, name:e.name, sets:done[e.id]||0, weight:wts[e.id] })) };
+  const nextBlock = () => {
+    if (blockIdx < blocks.length-1) { setBlockIdx(b=>b+1); setSubIdx(0); setTimer(null); }
+    else setFin(true);
+  };
+  const prevBlock = () => {
+    if (blockIdx > 0) { setBlockIdx(b=>b-1); setSubIdx(0); setTimer(null); }
+  };
+  const adj = (d) => setWts(w=>({...w,[curEx.id]:Math.max(0,+((w[curEx.id]||0)+d).toFixed(2))}));
+
+  const handleFinish = () => {
+    const session = { id:uid(), date:today(), duration:elapsed, exercises:routine.map(e=>({ id:e.id, name:e.name, sets:getExSets(e.id,blocks,rounds), weight:wts[e.id] })) };
     onSave(wts, session);
   };
 
-  if (fin) return <TrainingDone elapsed={elapsed} done={overDone} total={overTotal} onFinish={handleFinish}/>;
+  if (fin) return <TrainingDone elapsed={elapsed} done={doneRounds} total={totalRounds} onFinish={handleFinish}/>;
 
   return (
     <div style={{ position:'relative', height:'100%', background:'var(--bg)', display:'flex', flexDirection:'column' }}>
       <div style={{ height:56 }}/>
+      {/* ── header ── */}
       <div style={{ padding:'4px 20px 10px', display:'flex', alignItems:'center', gap:10 }}>
-        <button onClick={onExit} style={{ width:34, height:34, borderRadius:999, background:'var(--surface)', border:'1px solid var(--border)', color:'var(--text-dim)', display:'flex', alignItems:'center', justifyContent:'center' }}><I.X sz={16} st={2}/></button>
+        <button onClick={onExit} style={{ width:34,height:34,borderRadius:999,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center' }}><I.X sz={16} st={2}/></button>
         <div style={{ flex:1, textAlign:'center' }}>
-          <div style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-muted)', letterSpacing:'0.14em', textTransform:'uppercase' }}>Entrenando</div>
+          <div style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-muted)', letterSpacing:'0.14em', textTransform:'uppercase' }}>{dayLabel||'Entrenando'}</div>
           <div style={{ fontFamily:'var(--mono)', fontSize:14, color:'var(--text)', marginTop:2 }}>{fmtSecs(elapsed)}</div>
         </div>
-        <div style={{ width:34, height:34, borderRadius:999, background:'var(--surface)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-          <I.More sz={16} color="var(--text-dim)"/>
-        </div>
+        <div style={{ width:34,height:34 }}/>
       </div>
 
+      {/* ── progress bar by block ── */}
       <div style={{ padding:'0 20px 14px' }}>
         <div style={{ display:'flex', gap:4 }}>
-          {routine.map((e,i)=>(
-            <div key={e.id} style={{ flex:1, height:3, borderRadius:999, background:i<exIdx?'var(--accent)':i===exIdx?'var(--accent-dim)':'var(--surface-2)', position:'relative', overflow:'hidden' }}>
-              {i===exIdx&&<div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${(doneThis/ex.sets)*100}%`, background:'var(--accent)', transition:'width 320ms ease' }}/>}
-            </div>
-          ))}
+          {blocks.map((b,i)=>{
+            const rnd = rounds[b.id]||0;
+            const pct = i < blockIdx ? 1 : i === blockIdx ? rnd/b.sets : 0;
+            return (
+              <div key={b.id} style={{ flex:1, height:3, borderRadius:999, background:'var(--surface-2)', position:'relative', overflow:'hidden' }}>
+                <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${pct*100}%`, background:'var(--accent)', transition:'width 320ms ease' }}/>
+              </div>
+            );
+          })}
         </div>
         <div style={{ display:'flex', justifyContent:'space-between', marginTop:8, fontSize:11, color:'var(--text-muted)' }}>
-          <span style={{ fontFamily:'var(--mono)' }}>{String(exIdx+1).padStart(2,'0')} / {String(totalEx).padStart(2,'0')}</span>
-          <span style={{ fontFamily:'var(--mono)' }}>{overDone}/{overTotal} series</span>
+          <span style={{ fontFamily:'var(--mono)' }}>Bloque {String(blockIdx+1).padStart(2,'0')} / {String(blocks.length).padStart(2,'0')}</span>
+          <span style={{ fontFamily:'var(--mono)' }}>{doneRounds}/{totalRounds} series</span>
         </div>
       </div>
 
-      <div key={ex.id} style={{ flex:1, overflowY:'auto', padding:'0 20px 24px', animation:'fade-in 260ms ease both', WebkitOverflowScrolling:'touch' }}>
-        <div style={{ fontSize:13, color:'var(--text-dim)' }}>{ex.muscle}</div>
-        <div style={{ fontFamily:'var(--serif)', fontStyle:'italic', fontSize:34, lineHeight:1.05, marginTop:6, letterSpacing:'-0.02em' }}>{ex.name}</div>
+      {/* ── exercise content ── */}
+      <div key={curEx.id+'-'+subIdx} style={{ flex:1, overflowY:'auto', padding:'0 20px 24px', animation:'fade-in 260ms ease both', WebkitOverflowScrolling:'touch' }}>
+
+        {/* Superset indicator */}
+        {isSuperset && (
+          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
+            <div style={{ padding:'4px 12px', borderRadius:999, background:'var(--accent-dim)', color:'var(--accent)', fontSize:11.5, fontFamily:'var(--mono)', letterSpacing:'0.06em' }}>
+              Superserie · {subIdx+1}/{block.exercises.length}
+            </div>
+            <div style={{ display:'flex', gap:4 }}>
+              {block.exercises.map((_,i)=>(
+                <div key={i} style={{ width:i===subIdx?18:6, height:6, borderRadius:999, background:i<subIdx?'var(--success)':i===subIdx?'var(--accent)':'var(--surface-2)', transition:'all 200ms' }}/>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ fontSize:13, color:'var(--text-dim)' }}>{curEx.muscle}</div>
+        <div style={{ fontFamily:'var(--serif)', fontStyle:'italic', fontSize:34, lineHeight:1.05, marginTop:6, letterSpacing:'-0.02em' }}>{curEx.name}</div>
 
         <div style={{ marginTop:22, display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
           <div style={{ padding:18, borderRadius:20, background:'var(--surface)', border:'1px solid var(--border)' }}>
             <div style={{ fontSize:11, color:'var(--text-muted)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Peso</div>
             <div style={{ marginTop:6, display:'flex', alignItems:'baseline' }}>
-              <div style={{ fontFamily:'var(--mono)', fontSize:38, fontWeight:500, letterSpacing:'-0.02em' }}>{wts[ex.id]}</div>
+              <div style={{ fontFamily:'var(--mono)', fontSize:38, fontWeight:500, letterSpacing:'-0.02em' }}>{wts[curEx.id]}</div>
               <div style={{ marginLeft:4, fontSize:13, color:'var(--text-muted)' }}>kg</div>
             </div>
             <div style={{ display:'flex', gap:5, marginTop:12 }}>
@@ -859,27 +981,38 @@ function TrainingMode({ routine, onExit, onSave }) {
           </div>
           <div style={{ padding:18, borderRadius:20, background:'var(--surface)', border:'1px solid var(--border)' }}>
             <div style={{ fontSize:11, color:'var(--text-muted)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Reps</div>
-            <div style={{ marginTop:6, fontFamily:'var(--mono)', fontSize:38, fontWeight:500, letterSpacing:'-0.02em' }}>{ex.reps}</div>
-            <div style={{ marginTop:12, fontSize:12, color:'var(--text-dim)', lineHeight:1.4 }}>descanso {ex.restSec}s</div>
+            <div style={{ marginTop:6, fontFamily:'var(--mono)', fontSize:38, fontWeight:500, letterSpacing:'-0.02em' }}>{curEx.reps}</div>
+            {isMidBlock
+              ? <div style={{ marginTop:12, fontSize:12, color:'var(--accent)', fontWeight:500, lineHeight:1.4 }}>→ sin descanso</div>
+              : <div style={{ marginTop:12, fontSize:12, color:'var(--text-dim)', lineHeight:1.4 }}>descanso {block.restSec}s</div>
+            }
           </div>
         </div>
 
+        {/* Rounds / sets tracker */}
         <div style={{ marginTop:20 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10 }}>
-            <div style={{ fontSize:12, color:'var(--text-dim)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Series</div>
-            <div style={{ fontFamily:'var(--mono)', fontSize:13 }}>{doneThis}/{ex.sets}</div>
+            <div style={{ fontSize:12, color:'var(--text-dim)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase' }}>
+              {isSuperset ? 'Vueltas del bloque' : 'Series'}
+            </div>
+            <div style={{ fontFamily:'var(--mono)', fontSize:13 }}>{blockRnd}/{block.sets}</div>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            {Array.from({length:ex.sets}).map((_,i)=>{
-              const isDone=i<doneThis, isCurr=i===doneThis;
+            {Array.from({length:block.sets}).map((_,i)=>{
+              const isDone=i<blockRnd, isCurr=i===blockRnd&&!blockDone;
+              const label = isSuperset
+                ? (isDone ? block.exercises.map(e=>`${wts[e.id]}kg`).join(' + ')
+                   : isCurr ? `${block.exercises.length} ejercicios seguidos`
+                   : `${block.exercises.length} ejercicios`)
+                : (isDone ? `${wts[curEx.id]} kg · ${curEx.reps} reps`
+                   : isCurr ? 'Serie actual'
+                   : `${wts[curEx.id]} kg · ${curEx.reps} reps`);
               return (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 14px', borderRadius:12, background:isCurr?'var(--accent-dim)':isDone?'rgba(127,166,122,.07)':'var(--surface)', border:`1px solid ${isCurr?'var(--accent)':isDone?'rgba(127,166,122,.18)':'var(--border)'}`, transition:'all 200ms' }}>
                   <div style={{ width:26, height:26, borderRadius:999, background:isDone?'var(--success)':isCurr?'var(--accent)':'var(--surface-2)', color:(isDone||isCurr)?'#0e0b0a':'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'var(--mono)', fontSize:12, fontWeight:600 }}>
                     {isDone?<I.Check sz={14} st={2.4}/>:i+1}
                   </div>
-                  <div style={{ flex:1, fontSize:13, color:isDone?'var(--text-dim)':'var(--text)' }}>
-                    {isDone?`${wts[ex.id]} kg · ${ex.reps} reps`:isCurr?'Serie actual':`${wts[ex.id]} kg · ${ex.reps} reps`}
-                  </div>
+                  <div style={{ flex:1, fontSize:13, color:isDone?'var(--text-dim)':'var(--text)' }}>{label}</div>
                   {isDone&&<span style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-muted)' }}>✓</span>}
                 </div>
               );
@@ -889,12 +1022,17 @@ function TrainingMode({ routine, onExit, onSave }) {
         <div style={{ height:90 }}/>
       </div>
 
+      {/* ── action buttons ── */}
       <div style={{ padding:'12px 20px 28px', background:'linear-gradient(180deg,transparent,var(--bg) 40%)', display:'flex', gap:8 }}>
-        <button onClick={prev} disabled={exIdx===0} style={{ width:56, height:56, borderRadius:18, background:'var(--surface)', border:'1px solid var(--border)', color:'var(--text-dim)', display:'flex', alignItems:'center', justifyContent:'center', opacity:exIdx===0?.4:1, cursor:exIdx===0?'not-allowed':'pointer' }}><I.ChevL sz={20} st={2}/></button>
-        {doneThis<ex.sets
-          ? <Btn size="lg" onClick={completeSet} icon={<I.Check sz={18} st={2.2}/>} style={{ flex:1 }}>Serie hecha</Btn>
-          : <Btn size="lg" onClick={next} icon={<I.ChevR sz={18}/>} style={{ flex:1 }}>{exIdx<totalEx-1?'Siguiente':'Terminar'}</Btn>}
-        <button onClick={next} style={{ width:56, height:56, borderRadius:18, background:'var(--surface)', border:'1px solid var(--border)', color:'var(--text-dim)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}><I.ChevR sz={20} st={2}/></button>
+        <button onClick={prevBlock} disabled={blockIdx===0} style={{ width:56,height:56,borderRadius:18,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center',opacity:blockIdx===0?.4:1,cursor:blockIdx===0?'not-allowed':'pointer' }}><I.ChevL sz={20} st={2}/></button>
+        {!blockDone
+          ? (isMidBlock
+              ? <Btn size="lg" onClick={completeStep} icon={<I.ChevR sz={18}/>} style={{ flex:1, background:'var(--surface-2)', color:'var(--text)' }}>Siguiente ejercicio</Btn>
+              : <Btn size="lg" onClick={completeStep} icon={<I.Check sz={18} st={2.2}/>} style={{ flex:1 }}>Serie hecha</Btn>
+            )
+          : <Btn size="lg" onClick={nextBlock} icon={<I.ChevR sz={18}/>} style={{ flex:1 }}>{blockIdx<blocks.length-1?'Siguiente':'Terminar'}</Btn>
+        }
+        <button onClick={nextBlock} style={{ width:56,height:56,borderRadius:18,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer' }}><I.ChevR sz={20} st={2}/></button>
       </div>
 
       {timer&&timer.left>0&&<RestTimer timer={timer} onSkip={()=>setTimer(null)} onAdd={s=>setTimer(t=>t?{...t,left:t.left+s,total:t.total+s}:null)}/>}
