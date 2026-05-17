@@ -99,8 +99,8 @@ const S = {
   getUser:       ()  => S.get('pulso_user', null),
   setUser:       (u) => S.set('pulso_user', u),
 
-  getRoutine:    ()  => S.get('pulso_routine', DEFAULT_ROUTINE),
-  setRoutine:    (r) => S.set('pulso_routine', r),
+  getPlan:       ()  => S.get('pulso_plan', DEFAULT_PLAN),
+  setPlan:       (p) => S.set('pulso_plan', p),
 
   getWeights:    ()  => S.get('pulso_weights', {}),
   setWeights:    (w) => S.set('pulso_weights', w),
@@ -113,20 +113,39 @@ const S = {
 
   getMeals:      ()  => S.get('pulso_meals', {}),
   setMeals:      (m) => S.set('pulso_meals', m),
+
+  getMealPlan:   ()  => S.get('pulso_meal_plan', DEFAULT_MEAL_PLAN),
+  setMealPlan:   (p) => S.set('pulso_meal_plan', p),
 };
 
 /* ═══════════════════════════════════════════════════════════════
    DEFAULT DATA
 ═══════════════════════════════════════════════════════════════ */
-const DEFAULT_ROUTINE = [
-  { id:'sentadilla', name:'Sentadilla con barra', muscle:'Cuádriceps · Glúteo', sets:4, reps:'6-8',   restSec:120, defaultWeight:60 },
-  { id:'prensa',     name:'Prensa 45°',           muscle:'Cuádriceps',          sets:4, reps:'8-10',  restSec:90,  defaultWeight:80 },
-  { id:'rumano',     name:'Peso muerto rumano',   muscle:'Isquios · Glúteo',    sets:3, reps:'8-10',  restSec:120, defaultWeight:50 },
-  { id:'extension',  name:'Extensión cuádriceps', muscle:'Cuádriceps',          sets:3, reps:'10-12', restSec:60,  defaultWeight:30 },
-  { id:'gemelo',     name:'Gemelo de pie',        muscle:'Pantorrilla',         sets:4, reps:'12-15', restSec:60,  defaultWeight:40 },
+const DEFAULT_PLAN = [
+  { id:'day-a', letter:'A', name:'Piernas · Empuje', exercises:[
+    { id:'sentadilla', name:'Sentadilla con barra', muscle:'Cuádriceps · Glúteo', sets:4, reps:'6-8',   restSec:120, defaultWeight:60 },
+    { id:'prensa',     name:'Prensa 45°',           muscle:'Cuádriceps',          sets:4, reps:'8-10',  restSec:90,  defaultWeight:80 },
+    { id:'rumano',     name:'Peso muerto rumano',   muscle:'Isquios · Glúteo',    sets:3, reps:'8-10',  restSec:120, defaultWeight:50 },
+    { id:'extension',  name:'Extensión cuádriceps', muscle:'Cuádriceps',          sets:3, reps:'10-12', restSec:60,  defaultWeight:30 },
+    { id:'gemelo',     name:'Gemelo de pie',        muscle:'Pantorrilla',         sets:4, reps:'12-15', restSec:60,  defaultWeight:40 },
+  ]},
+  { id:'day-b', letter:'B', name:'Pecho · Hombros · Tríceps', exercises:[
+    { id:'press-banca',  name:'Press de banca',          muscle:'Pecho · Tríceps',   sets:4, reps:'6-8',   restSec:120, defaultWeight:60 },
+    { id:'press-incl',   name:'Press inclinado mancuerna',muscle:'Pecho alto',        sets:3, reps:'8-10',  restSec:90,  defaultWeight:22 },
+    { id:'press-hombro', name:'Press militar',           muscle:'Hombro · Tríceps',  sets:4, reps:'8-10',  restSec:120, defaultWeight:40 },
+    { id:'elevaciones',  name:'Elevaciones laterales',   muscle:'Deltoides lateral', sets:3, reps:'12-15', restSec:60,  defaultWeight:10 },
+    { id:'triceps-pol',  name:'Extensión tríceps polea', muscle:'Tríceps',           sets:3, reps:'10-12', restSec:60,  defaultWeight:20 },
+  ]},
+  { id:'day-c', letter:'C', name:'Espalda · Bíceps', exercises:[
+    { id:'dominadas',   name:'Dominadas / Jalón alto', muscle:'Espalda · Bíceps',  sets:4, reps:'6-10',  restSec:120, defaultWeight:0  },
+    { id:'remo-barra',  name:'Remo con barra',         muscle:'Espalda media',     sets:4, reps:'8-10',  restSec:90,  defaultWeight:50 },
+    { id:'remo-cable',  name:'Remo en cable',          muscle:'Espalda · Bíceps',  sets:3, reps:'10-12', restSec:60,  defaultWeight:40 },
+    { id:'curl-barra',  name:'Curl de bíceps',         muscle:'Bíceps',            sets:3, reps:'8-12',  restSec:60,  defaultWeight:25 },
+    { id:'curl-martil', name:'Curl martillo',          muscle:'Bíceps · Braquial', sets:3, reps:'10-12', restSec:60,  defaultWeight:16 },
+  ]},
 ];
 
-const MEAL_PLAN = {
+const DEFAULT_MEAL_PLAN = {
   goal: 'Recomposición · 2.380 kcal',
   macros: { kcal: 2380, p: 175, c: 240, f: 75 },
   blocks: [
@@ -517,12 +536,33 @@ function WelcomeAnim({ name, onDone }) {
    RUTINA TAB
 ═══════════════════════════════════════════════════════════════ */
 function RutinaTab({ training, setTraining }) {
-  const [routine, setRoutine] = useState(()=>S.getRoutine());
-  const [showAddEx, setShowAddEx] = useState(false);
+  const [plan, setPlan_]     = useState(()=>S.getPlan());
+  const [selDayId, setSelDayId] = useState(()=>S.getPlan()[0]?.id||null);
+  const [showAddDay, setShowAddDay] = useState(false);
+  const [editDayId,  setEditDayId]  = useState(null);
+  const [showAddEx,  setShowAddEx]  = useState(false);
 
-  const saveRoutine = (r) => { setRoutine(r); S.setRoutine(r); };
+  const savePlan   = (p) => { setPlan_(p); S.setPlan(p); };
+  const selDay     = plan.find(d=>d.id===selDayId) || plan[0] || null;
 
-  if (training) return <TrainingMode routine={routine} onExit={()=>setTraining(null)} onSave={(updatedWeights, sessionRecord)=>{ S.setWeights(updatedWeights); S.addSession(sessionRecord); setTraining(null); }}/>;
+  if (training) return (
+    <TrainingMode
+      routine={selDay?.exercises||[]}
+      dayLabel={selDay ? `Día ${selDay.letter}` : 'Entrenamiento'}
+      onExit={()=>setTraining(null)}
+      onSave={(updatedWeights, sessionRecord)=>{ S.setWeights(updatedWeights); S.addSession(sessionRecord); setTraining(null); }}
+    />
+  );
+
+  const updateDay = (dayId, updates) => savePlan(plan.map(d=>d.id===dayId?{...d,...updates}:d));
+  const deleteDay = (dayId) => {
+    const next = plan.filter(d=>d.id!==dayId);
+    savePlan(next);
+    if (selDayId===dayId) setSelDayId(next[0]?.id||null);
+  };
+  const addExercise    = (ex)          => { updateDay(selDay.id,{exercises:[...selDay.exercises,{...ex,id:uid()}]}); setShowAddEx(false); };
+  const editExercise   = (exId,updated) => updateDay(selDay.id,{exercises:selDay.exercises.map(e=>e.id===exId?updated:e)});
+  const deleteExercise = (exId)         => updateDay(selDay.id,{exercises:selDay.exercises.filter(e=>e.id!==exId)});
 
   return (
     <>
@@ -534,43 +574,84 @@ function RutinaTab({ training, setTraining }) {
           <div style={{ fontFamily:'var(--serif)', fontStyle:'italic', fontSize:34, letterSpacing:'-0.02em', lineHeight:1.1, marginTop:6 }}>Tu rutina</div>
         </div>
 
-        {/* today's card */}
-        <Card accent style={{ marginTop:20, overflow:'hidden' }}>
-          <div style={{ padding:'20px 20px 16px' }}>
+        {/* ── Day selector ─────────────────────────────── */}
+        <div style={{ marginTop:20, display:'flex', gap:8, overflowX:'auto', paddingBottom:2 }}>
+          {plan.map(d=>{
+            const on = d.id===selDay?.id;
+            return (
+              <button key={d.id} onClick={()=>setSelDayId(d.id)}
+                style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:4, padding:'12px 16px', borderRadius:16, minWidth:70, flexShrink:0, background:on?'var(--accent)':'var(--surface)', border:`1px solid ${on?'var(--accent)':'var(--border)'}`, color:on?'#1a0f0a':'var(--text-dim)', cursor:'pointer', transition:'all 180ms', fontFamily:'var(--sans)' }}>
+                <div style={{ fontSize:22, fontWeight:700, fontFamily:'var(--mono)', lineHeight:1 }}>{d.letter}</div>
+                <div style={{ fontSize:10, fontWeight:500, whiteSpace:'nowrap', maxWidth:64, overflow:'hidden', textOverflow:'ellipsis' }}>{d.name.split('·')[0].trim()}</div>
+              </button>
+            );
+          })}
+          <button onClick={()=>setShowAddDay(true)}
+            style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4, padding:'12px 16px', borderRadius:16, minWidth:56, flexShrink:0, background:'transparent', border:'1px dashed var(--border-strong)', color:'var(--text-muted)', cursor:'pointer', fontFamily:'var(--sans)' }}>
+            <I.Plus sz={18} st={1.8}/>
+            <div style={{ fontSize:10 }}>Día</div>
+          </button>
+        </div>
+
+        {/* ── Selected day card ─────────────────────────── */}
+        {selDay && (
+          <Card accent style={{ marginTop:16, padding:'20px 20px 18px' }}>
             <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:12 }}>
-              <div>
-                <Chip tone="accent" icon={<I.Flame sz={11}/>}>Hoy</Chip>
-                <div style={{ marginTop:10, fontSize:20, fontWeight:500, lineHeight:1.2 }}>Entrenamiento</div>
-                <div style={{ marginTop:4, color:'var(--text-dim)', fontSize:13 }}>{routine.length} ejercicios · {routine.reduce((a,e)=>a+e.sets,0)} series</div>
+              <div style={{ flex:1 }}>
+                <Chip tone="accent" icon={<I.Flame sz={11}/>}>Día {selDay.letter}</Chip>
+                <div style={{ marginTop:10, fontSize:20, fontWeight:500, lineHeight:1.2 }}>{selDay.name}</div>
+                <div style={{ marginTop:4, color:'var(--text-dim)', fontSize:13 }}>{selDay.exercises.length} ejercicios · {selDay.exercises.reduce((a,e)=>a+e.sets,0)} series</div>
               </div>
-              <div style={{ width:56, height:56, borderRadius:14, background:'var(--accent)', color:'#1a0f0a', display:'flex', alignItems:'center', justifyContent:'center', fontSize:26, flexShrink:0 }}>🏋️</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
+                <div style={{ width:52, height:52, borderRadius:14, background:'var(--accent)', color:'#1a0f0a', display:'flex', alignItems:'center', justifyContent:'center', fontSize:24, flexShrink:0 }}>🏋️</div>
+                <button onClick={()=>setEditDayId(selDay.id)} style={{ background:'transparent', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, fontFamily:'var(--sans)', display:'flex', alignItems:'center', gap:3, padding:0 }}><I.Edit sz={12}/>editar</button>
+              </div>
             </div>
             <Btn size="md" onClick={()=>setTraining(true)} icon={<I.Play sz={15}/>} style={{ width:'100%', marginTop:16 }}>Empezar entrenamiento</Btn>
-          </div>
-          {/* preview */}
-          <div style={{ display:'flex', gap:8, overflowX:'auto', padding:'0 20px 18px' }}>
-            {routine.slice(0,4).map((e,i)=>(
-              <div key={e.id} style={{ minWidth:88, padding:'10px 12px', borderRadius:12, background:'rgba(14,11,10,.5)', border:'1px solid var(--border)', flexShrink:0 }}>
-                <div style={{ fontSize:10, color:'var(--text-muted)', fontFamily:'var(--mono)' }}>{String(i+1).padStart(2,'0')}</div>
-                <div style={{ fontSize:12, color:'var(--text)', marginTop:4, lineHeight:1.3 }}>{e.name.split(' ').slice(0,2).join(' ')}</div>
-              </div>
-            ))}
-            {routine.length>4&&<div style={{ minWidth:52, padding:'10px 12px', borderRadius:12, background:'rgba(14,11,10,.5)', border:'1px dashed var(--border-strong)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', fontSize:12, flexShrink:0 }}>+{routine.length-4}</div>}
-          </div>
-        </Card>
+          </Card>
+        )}
 
-        {/* exercise list */}
-        <div style={{ marginTop:26 }}>
-          <SecTitle eyebrow="Ejercicios" action={
-            <button onClick={()=>setShowAddEx(true)} style={{ background:'transparent', border:'none', color:'var(--accent)', fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontFamily:'var(--sans)' }}><I.Plus sz={14} st={2}/>Agregar</button>
-          }>Plan</SecTitle>
-          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            {routine.map((e,i)=><ExRow key={e.id} ex={e} num={i+1} onDelete={()=>saveRoutine(routine.filter(x=>x.id!==e.id))} onEdit={updated=>saveRoutine(routine.map(x=>x.id===e.id?updated:x))}/>)}
+        {/* ── Exercise list ─────────────────────────────── */}
+        {selDay && (
+          <div style={{ marginTop:26 }}>
+            <SecTitle eyebrow="Ejercicios" action={
+              <button onClick={()=>setShowAddEx(true)} style={{ background:'transparent', border:'none', color:'var(--accent)', fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', gap:4, fontFamily:'var(--sans)' }}><I.Plus sz={14} st={2}/>Agregar</button>
+            }>Día {selDay.letter} · Plan</SecTitle>
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {selDay.exercises.map((e,i)=>(
+                <ExRow key={e.id} ex={e} num={i+1}
+                  onDelete={()=>deleteExercise(e.id)}
+                  onEdit={updated=>editExercise(e.id,updated)}
+                />
+              ))}
+            </div>
+            {selDay.exercises.length===0&&<div style={{ padding:'40px 0', textAlign:'center', color:'var(--text-muted)', fontSize:14 }}>Sin ejercicios todavía.<br/>Agregá el primero arriba.</div>}
           </div>
-          {routine.length===0&&<div style={{ padding:'40px 0', textAlign:'center', color:'var(--text-muted)', fontSize:14 }}>Todavía no tenés ejercicios.<br/>Agregá el primero arriba.</div>}
-        </div>
+        )}
+
+        {!selDay && (
+          <div style={{ padding:'60px 0', textAlign:'center', color:'var(--text-muted)', fontSize:14 }}>
+            No hay días en tu plan.<br/>Presioná + para agregar el primero.
+          </div>
+        )}
       </Screen>
-      {showAddEx && <AddExerciseModal onClose={()=>setShowAddEx(false)} onAdd={ex=>{ saveRoutine([...routine,{...ex,id:uid()}]); setShowAddEx(false); }}/>}
+
+      {showAddDay && (
+        <AddDayModal
+          usedLetters={plan.map(d=>d.letter)}
+          onClose={()=>setShowAddDay(false)}
+          onAdd={day=>{ const np=[...plan,day]; savePlan(np); setSelDayId(day.id); setShowAddDay(false); }}
+        />
+      )}
+      {editDayId && (
+        <EditDayModal
+          day={plan.find(d=>d.id===editDayId)}
+          onClose={()=>setEditDayId(null)}
+          onSave={upd=>{ updateDay(editDayId,upd); setEditDayId(null); }}
+          onDelete={()=>{ deleteDay(editDayId); setEditDayId(null); }}
+        />
+      )}
+      {showAddEx && <AddExerciseModal onClose={()=>setShowAddEx(false)} onAdd={addExercise}/>}
     </>
   );
 }
@@ -644,6 +725,48 @@ function EditExerciseModal({ ex, onClose, onSave }) {
         ))}
       </div>
       <Btn size="lg" onClick={()=>onSave(form)} style={{ width:'100%', marginBottom:8 }} icon={<I.Save sz={18}/>}>Guardar cambios</Btn>
+    </Modal>
+  );
+}
+
+function AddDayModal({ usedLetters, onClose, onAdd }) {
+  const ALL_LETTERS = ['A','B','C','D','E','F','G','H'];
+  const nextLetter  = ALL_LETTERS.find(l=>!usedLetters.includes(l)) || 'X';
+  const [form, setForm] = useState({ letter:nextLetter, name:'' });
+  const set  = (k,v) => setForm(f=>({...f,[k]:v}));
+  const valid = form.name.trim().length>0 && form.letter.trim().length>0;
+  return (
+    <Modal title="Nuevo día" onClose={onClose}>
+      <div style={{ display:'grid', gridTemplateColumns:'78px 1fr', gap:12, marginBottom:16 }}>
+        <div>
+          <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:6, letterSpacing:'0.06em', textTransform:'uppercase' }}>Letra</div>
+          <input type="text" value={form.letter} onChange={e=>set('letter',e.target.value.toUpperCase().slice(0,2))} maxLength={2}
+            style={{ width:'100%', padding:'10px 8px', borderRadius:12, background:'var(--bg)', border:'1px solid var(--border-strong)', color:'var(--text)', fontSize:22, fontFamily:'var(--mono)', fontWeight:700, textAlign:'center', outline:'none' }}
+            onFocus={e=>e.target.style.borderColor='var(--accent)'} onBlur={e=>e.target.style.borderColor='var(--border-strong)'}/>
+        </div>
+        <Field label="Nombre del día" value={form.name} onChange={v=>set('name',v)} placeholder="Ej. Pecho · Hombros"/>
+      </div>
+      <Btn size="lg" onClick={()=>onAdd({id:uid(), letter:form.letter.trim(), name:form.name.trim(), exercises:[]})} disabled={!valid} style={{ width:'100%', marginBottom:8 }} icon={<I.Plus sz={18}/>}>Crear día</Btn>
+    </Modal>
+  );
+}
+
+function EditDayModal({ day, onClose, onSave, onDelete }) {
+  const [form, setForm] = useState({ letter:day.letter, name:day.name });
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  return (
+    <Modal title="Editar día" onClose={onClose}>
+      <div style={{ display:'grid', gridTemplateColumns:'78px 1fr', gap:12, marginBottom:16 }}>
+        <div>
+          <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:6, letterSpacing:'0.06em', textTransform:'uppercase' }}>Letra</div>
+          <input type="text" value={form.letter} onChange={e=>set('letter',e.target.value.toUpperCase().slice(0,2))} maxLength={2}
+            style={{ width:'100%', padding:'10px 8px', borderRadius:12, background:'var(--bg)', border:'1px solid var(--border-strong)', color:'var(--text)', fontSize:22, fontFamily:'var(--mono)', fontWeight:700, textAlign:'center', outline:'none' }}
+            onFocus={e=>e.target.style.borderColor='var(--accent)'} onBlur={e=>e.target.style.borderColor='var(--border-strong)'}/>
+        </div>
+        <Field label="Nombre del día" value={form.name} onChange={v=>set('name',v)}/>
+      </div>
+      <Btn size="lg" onClick={()=>onSave(form)} style={{ width:'100%', marginBottom:10 }} icon={<I.Save sz={18}/>}>Guardar cambios</Btn>
+      <Btn variant="danger" size="md" onClick={onDelete} style={{ width:'100%', marginBottom:8 }} icon={<I.Trash sz={16}/>}>Eliminar día</Btn>
     </Modal>
   );
 }
@@ -827,41 +950,62 @@ function TrainingDone({ elapsed, done, total, onFinish }) {
 ═══════════════════════════════════════════════════════════════ */
 function AlimentacionTab() {
   const todayKey = today();
-  const allMeals = S.getMeals();
-  const [selected, setSelected] = useState(allMeals[todayKey]||{});
+  const [mealPlan,  setMealPlan_] = useState(()=>S.getMealPlan());
+  const [selected,  setSelected]  = useState(()=>S.getMeals()[todayKey]||{});
   const [openBlock, setOpenBlock] = useState(null);
+  const [editMode,  setEditMode]  = useState(false);
 
-  const saveSel = (newSel) => { setSelected(newSel); S.setMeals({...allMeals,[todayKey]:newSel}); };
+  const saveMealPlan = (p) => { setMealPlan_(p); S.setMealPlan(p); };
+  const saveSel      = (ns) => { setSelected(ns); S.setMeals({...S.getMeals(),[todayKey]:ns}); };
 
+  /* ── Meal selection detail ─── */
   if (openBlock) {
-    const block = MEAL_PLAN.blocks.find(b=>b.key===openBlock);
+    const block = mealPlan.blocks.find(b=>b.key===openBlock);
+    if (!block) { setOpenBlock(null); return null; }
     return <MealDetail block={block} selIdx={selected[openBlock]??null} onClose={()=>setOpenBlock(null)} onSelect={i=>{ saveSel({...selected,[openBlock]:i}); setOpenBlock(null); }}/>;
   }
 
-  const totalKcal = MEAL_PLAN.blocks.reduce((a,b)=>{ const i=selected[b.key]; return a+(i!=null?b.options[i]?.kcal:0)||a; },0);
-  const totalP    = MEAL_PLAN.blocks.reduce((a,b)=>{ const i=selected[b.key]; return a+(i!=null?b.options[i]?.p:0)||a; },0);
-  const totalC    = MEAL_PLAN.blocks.reduce((a,b)=>{ const i=selected[b.key]; return a+(i!=null?b.options[i]?.c:0)||a; },0);
-  const totalF    = MEAL_PLAN.blocks.reduce((a,b)=>{ const i=selected[b.key]; return a+(i!=null?b.options[i]?.f:0)||a; },0);
+  /* ── Edit plan screen ─── */
+  if (editMode) {
+    return (
+      <MealPlanEditor
+        mealPlan={mealPlan}
+        onSave={p=>{ saveMealPlan(p); setEditMode(false); }}
+        onClose={()=>setEditMode(false)}
+      />
+    );
+  }
+
+  /* ── Normal view ─── */
+  const totalKcal = mealPlan.blocks.reduce((a,b)=>{ const i=selected[b.key]; return a+(i!=null?b.options[i]?.kcal:0)||a; },0);
+  const totalP    = mealPlan.blocks.reduce((a,b)=>{ const i=selected[b.key]; return a+(i!=null?b.options[i]?.p:0)||a; },0);
+  const totalC    = mealPlan.blocks.reduce((a,b)=>{ const i=selected[b.key]; return a+(i!=null?b.options[i]?.c:0)||a; },0);
+  const totalF    = mealPlan.blocks.reduce((a,b)=>{ const i=selected[b.key]; return a+(i!=null?b.options[i]?.f:0)||a; },0);
 
   return (
     <Screen>
-      <div>
-        <div style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-muted)', letterSpacing:'0.14em', textTransform:'uppercase' }}>Plan de comidas</div>
-        <div style={{ fontFamily:'var(--serif)', fontStyle:'italic', fontSize:34, letterSpacing:'-0.02em', lineHeight:1.1, marginTop:6 }}>Alimentación</div>
+      <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginBottom:4 }}>
+        <div>
+          <div style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-muted)', letterSpacing:'0.14em', textTransform:'uppercase' }}>Plan de comidas</div>
+          <div style={{ fontFamily:'var(--serif)', fontStyle:'italic', fontSize:34, letterSpacing:'-0.02em', lineHeight:1.1, marginTop:6 }}>Alimentación</div>
+        </div>
+        <button onClick={()=>setEditMode(true)} style={{ flexShrink:0, background:'transparent', border:'1px solid var(--border-strong)', borderRadius:12, color:'var(--text-dim)', padding:'8px 14px', fontSize:13, cursor:'pointer', display:'flex', alignItems:'center', gap:6, fontFamily:'var(--sans)', marginBottom:4 }}>
+          <I.Edit sz={13}/>Editar
+        </button>
       </div>
 
       <Card style={{ marginTop:22, padding:22 }}>
         <div style={{ display:'flex', alignItems:'center', gap:18 }}>
-          <CircleProg size={104} stroke={9} value={totalKcal} max={MEAL_PLAN.macros.kcal}>
+          <CircleProg size={104} stroke={9} value={totalKcal} max={mealPlan.macros.kcal}>
             <div style={{ fontFamily:'var(--mono)', fontSize:20, fontWeight:500 }}>{totalKcal}</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>/ {MEAL_PLAN.macros.kcal}</div>
+            <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:1 }}>/ {mealPlan.macros.kcal}</div>
           </CircleProg>
           <div style={{ flex:1, minWidth:0 }}>
-            <Chip tone="accent" icon={<I.Target sz={11}/>}>Recomposición</Chip>
+            <Chip tone="accent" icon={<I.Target sz={11}/>}>Plan activo</Chip>
             <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:7 }}>
-              <MBar label="Proteínas"    value={totalP} max={MEAL_PLAN.macros.p} unit="g" accent/>
-              <MBar label="Carbos"       value={totalC} max={MEAL_PLAN.macros.c} unit="g"/>
-              <MBar label="Grasas"       value={totalF} max={MEAL_PLAN.macros.f} unit="g"/>
+              <MBar label="Proteínas" value={totalP} max={mealPlan.macros.p} unit="g" accent/>
+              <MBar label="Carbos"    value={totalC} max={mealPlan.macros.c} unit="g"/>
+              <MBar label="Grasas"    value={totalF} max={mealPlan.macros.f} unit="g"/>
             </div>
           </div>
         </div>
@@ -870,7 +1014,7 @@ function AlimentacionTab() {
       <div style={{ marginTop:26 }}>
         <SecTitle eyebrow="Hoy">Tus comidas</SecTitle>
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-          {MEAL_PLAN.blocks.map(b=>{
+          {mealPlan.blocks.map(b=>{
             const idx=selected[b.key], picked=idx!=null?b.options[idx]:null;
             return (
               <Card key={b.key} onClick={()=>setOpenBlock(b.key)} style={{ padding:0 }}>
@@ -885,10 +1029,13 @@ function AlimentacionTab() {
                     </div>
                     <I.ChevR sz={16} color="var(--text-muted)"/>
                   </div>
-                  {!picked && (
+                  {!picked && b.options.length>0 && (
                     <div style={{ marginTop:12, display:'flex', gap:6, flexWrap:'wrap' }}>
                       {b.options.slice(0,3).map((o,i)=><div key={i} style={{ padding:'5px 10px', borderRadius:999, background:'var(--surface-2)', color:'var(--text-dim)', fontSize:11.5, whiteSpace:'nowrap', maxWidth:150, overflow:'hidden', textOverflow:'ellipsis' }}>{o.name}</div>)}
                     </div>
+                  )}
+                  {!picked && b.options.length===0 && (
+                    <div style={{ marginTop:8, fontSize:12, color:'var(--text-muted)' }}>Sin opciones — editá el plan para agregar.</div>
                   )}
                   {picked && (
                     <div style={{ marginTop:12, display:'flex', gap:12 }}>
@@ -969,6 +1116,160 @@ function MealDetail({ block, selIdx, onClose, onSelect }) {
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MEAL PLAN EDITOR
+═══════════════════════════════════════════════════════════════ */
+function MealPlanEditor({ mealPlan: initPlan, onSave, onClose }) {
+  const [plan, setPlan_]    = useState(()=>JSON.parse(JSON.stringify(initPlan)));
+  const [editingOpt, setEditingOpt] = useState(null); // { blockKey, optIdx } — -1 = new
+
+  const setMacro     = (k,v) => setPlan_(p=>({...p, macros:{...p.macros,[k]:+v||0}}));
+  const updateBlock  = (key,upd) => setPlan_(p=>({...p, blocks:p.blocks.map(b=>b.key===key?{...b,...upd}:b)}));
+  const deleteBlock  = (key) => setPlan_(p=>({...p, blocks:p.blocks.filter(b=>b.key!==key)}));
+  const addBlock     = ()    => setPlan_(p=>({...p, blocks:[...p.blocks,{key:'block-'+uid(),title:'Nueva comida',subtitle:'',options:[]}]}));
+  const deleteOpt    = (bk,oi) => setPlan_(p=>({...p, blocks:p.blocks.map(b=>b.key!==bk?b:{...b,options:b.options.filter((_,i)=>i!==oi)})}));
+  const saveOpt      = (bk,oi,opt) => {
+    setPlan_(p=>({...p, blocks:p.blocks.map(b=>{
+      if(b.key!==bk) return b;
+      const opts=[...b.options];
+      oi===-1 ? opts.push(opt) : opts[oi]=opt;
+      return {...b,options:opts};
+    })}));
+    setEditingOpt(null);
+  };
+
+  if (editingOpt) {
+    const block = plan.blocks.find(b=>b.key===editingOpt.blockKey);
+    const opt   = editingOpt.optIdx>=0 ? block?.options[editingOpt.optIdx] : null;
+    return (
+      <EditOptionScreen
+        opt={opt}
+        blockTitle={block?.title}
+        onClose={()=>setEditingOpt(null)}
+        onSave={updated=>saveOpt(editingOpt.blockKey, editingOpt.optIdx, updated)}
+      />
+    );
+  }
+
+  return (
+    <div style={{ position:'absolute', inset:0, background:'var(--bg)', display:'flex', flexDirection:'column', zIndex:30, animation:'fade-in 260ms ease both' }}>
+      <div style={{ height:56 }}/>
+      {/* header */}
+      <div style={{ padding:'6px 22px 14px', display:'flex', alignItems:'center', gap:12, flexShrink:0, borderBottom:'1px solid var(--border)' }}>
+        <button onClick={onClose} style={{ width:34,height:34,borderRadius:999,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center' }}><I.ChevL sz={18} st={1.8}/></button>
+        <div style={{ flex:1 }}>
+          <div style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-muted)', letterSpacing:'0.14em', textTransform:'uppercase' }}>Editando</div>
+          <div style={{ fontSize:19, fontWeight:500, marginTop:2 }}>Plan de comidas</div>
+        </div>
+        <button onClick={()=>onSave(plan)} style={{ padding:'10px 18px', borderRadius:14, background:'var(--accent)', border:'none', color:'#1a0f0a', fontFamily:'var(--sans)', fontSize:14, fontWeight:500, cursor:'pointer' }}>Guardar</button>
+      </div>
+
+      <div style={{ flex:1, overflowY:'auto', padding:'16px 20px 48px', WebkitOverflowScrolling:'touch' }}>
+        {/* Macro goals */}
+        <div style={{ padding:18, borderRadius:18, background:'var(--surface)', border:'1px solid var(--border)', marginBottom:20 }}>
+          <div style={{ fontFamily:'var(--mono)', fontSize:11, color:'var(--text-muted)', letterSpacing:'0.12em', textTransform:'uppercase', marginBottom:14 }}>Objetivos diarios</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+            {[['kcal','kcal','Calorías'],['p','g','Proteínas'],['c','g','Carbos'],['f','g','Grasas']].map(([k,u,lb])=>(
+              <div key={k}>
+                <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:5, textTransform:'uppercase', letterSpacing:'0.06em' }}>{lb}</div>
+                <div style={{ position:'relative' }}>
+                  <input type="number" value={plan.macros[k]||''} onChange={e=>setMacro(k,e.target.value)} min={0}
+                    style={{ width:'100%', padding:'10px 30px 10px 12px', borderRadius:10, background:'var(--bg)', border:'1px solid var(--border-strong)', color:'var(--text)', fontSize:15, fontFamily:'var(--mono)', outline:'none' }}
+                    onFocus={e=>e.target.style.borderColor='var(--accent)'} onBlur={e=>e.target.style.borderColor='var(--border-strong)'}/>
+                  <span style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', fontSize:11, color:'var(--text-muted)', fontFamily:'var(--mono)', pointerEvents:'none' }}>{u}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Meal blocks */}
+        {plan.blocks.map(b=>(
+          <div key={b.key} style={{ marginBottom:14, borderRadius:18, background:'var(--surface)', border:'1px solid var(--border)', overflow:'hidden' }}>
+            {/* block header */}
+            <div style={{ padding:'14px 16px 10px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'flex-start', gap:10 }}>
+              <div style={{ flex:1 }}>
+                <input
+                  value={b.title}
+                  onChange={e=>updateBlock(b.key,{title:e.target.value})}
+                  placeholder="Nombre de la comida"
+                  style={{ background:'transparent', border:'none', color:'var(--text)', fontSize:15.5, fontWeight:500, fontFamily:'var(--sans)', outline:'none', padding:0, width:'100%' }}
+                />
+                <input
+                  value={b.subtitle||''}
+                  onChange={e=>updateBlock(b.key,{subtitle:e.target.value})}
+                  placeholder="Ej. ~550 kcal"
+                  style={{ background:'transparent', border:'none', color:'var(--text-muted)', fontSize:12.5, fontFamily:'var(--sans)', outline:'none', padding:0, marginTop:3, width:'100%' }}
+                />
+              </div>
+              <button onClick={()=>deleteBlock(b.key)} style={{ background:'transparent', border:'none', color:'var(--text-muted)', cursor:'pointer', padding:4, flexShrink:0 }}><I.Trash sz={15}/></button>
+            </div>
+            {/* options */}
+            <div style={{ padding:'6px 16px 12px' }}>
+              {b.options.map((o,i)=>(
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 0', borderBottom:'1px solid var(--border)' }}>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13.5, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{o.name}</div>
+                    <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:2 }}>{o.kcal} kcal · P{o.p}g · C{o.c}g · G{o.f}g</div>
+                  </div>
+                  <button onClick={()=>setEditingOpt({blockKey:b.key,optIdx:i})} style={{ background:'transparent',border:'none',color:'var(--text-dim)',cursor:'pointer',padding:4,flexShrink:0 }}><I.Edit sz={14}/></button>
+                  <button onClick={()=>deleteOpt(b.key,i)}                       style={{ background:'transparent',border:'none',color:'var(--text-muted)',cursor:'pointer',padding:4,flexShrink:0 }}><I.Trash sz={14}/></button>
+                </div>
+              ))}
+              {b.options.length===0&&<div style={{ padding:'10px 0', fontSize:12.5, color:'var(--text-muted)' }}>Sin opciones todavía.</div>}
+              <button onClick={()=>setEditingOpt({blockKey:b.key,optIdx:-1})}
+                style={{ marginTop:10, display:'flex', alignItems:'center', gap:6, background:'transparent', border:'1px dashed var(--border-strong)', borderRadius:10, padding:'8px 14px', color:'var(--accent)', fontSize:13, cursor:'pointer', fontFamily:'var(--sans)' }}>
+                <I.Plus sz={13} st={2}/>Agregar opción
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {/* add block */}
+        <button onClick={addBlock}
+          style={{ width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, padding:14, borderRadius:16, background:'transparent', border:'1px dashed var(--border-strong)', color:'var(--text-dim)', fontSize:14, cursor:'pointer', fontFamily:'var(--sans)' }}>
+          <I.Plus sz={16} st={2}/>Agregar comida
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditOptionScreen({ opt, blockTitle, onClose, onSave }) {
+  const [form, setForm] = useState(opt ? {...opt} : { name:'', desc:'', kcal:0, p:0, c:0, f:0 });
+  const set   = (k,v) => setForm(f=>({...f,[k]:v}));
+  const valid = form.name.trim().length>0;
+  return (
+    <div style={{ position:'absolute', inset:0, background:'var(--bg)', display:'flex', flexDirection:'column', zIndex:40, animation:'fade-in 260ms ease both' }}>
+      <div style={{ height:56 }}/>
+      <div style={{ padding:'6px 22px 14px', display:'flex', alignItems:'center', gap:12, flexShrink:0, borderBottom:'1px solid var(--border)' }}>
+        <button onClick={onClose} style={{ width:34,height:34,borderRadius:999,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center' }}><I.ChevL sz={18} st={1.8}/></button>
+        <div style={{ flex:1 }}>
+          <div style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-muted)', letterSpacing:'0.14em', textTransform:'uppercase' }}>{blockTitle}</div>
+          <div style={{ fontSize:19, fontWeight:500, marginTop:2 }}>{opt ? 'Editar opción' : 'Nueva opción'}</div>
+        </div>
+      </div>
+      <div style={{ flex:1, overflowY:'auto', padding:'18px 22px 40px', WebkitOverflowScrolling:'touch' }}>
+        <Field label="Nombre" value={form.name} onChange={v=>set('name',v)} placeholder="Ej. Pollo con arroz"/>
+        <Field label="Descripción" value={form.desc||''} onChange={v=>set('desc',v)} placeholder="Ej. 180g pollo · 120g arroz · brócoli"/>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:20 }}>
+          {[['Calorías','kcal'],['Proteínas (g)','p'],['Carbos (g)','c'],['Grasas (g)','f']].map(([lb,k])=>(
+            <div key={k}>
+              <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:6, letterSpacing:'0.06em', textTransform:'uppercase' }}>{lb}</div>
+              <input type="number" value={form[k]||''} onChange={e=>set(k,+e.target.value||0)} min={0}
+                style={{ width:'100%', padding:'12px 14px', borderRadius:12, background:'var(--bg)', border:'1px solid var(--border-strong)', color:'var(--text)', fontSize:16, fontFamily:'var(--mono)', outline:'none' }}
+                onFocus={e=>e.target.style.borderColor='var(--accent)'} onBlur={e=>e.target.style.borderColor='var(--border-strong)'}/>
+            </div>
+          ))}
+        </div>
+        <Btn size="lg" onClick={()=>onSave(form)} disabled={!valid} style={{ width:'100%', marginBottom:8 }} icon={<I.Save sz={18}/>}>
+          {opt ? 'Guardar cambios' : 'Agregar opción'}
+        </Btn>
       </div>
     </div>
   );
