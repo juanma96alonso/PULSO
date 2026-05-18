@@ -1,8 +1,8 @@
-const CACHE = 'pulso-v1';
+const CACHE = 'pulso-v2';
 
 // Files to cache for offline use
 const SHELL = [
-  './pulso-fitness.html',
+  './index.html',
   './pulso-manifest.json',
   './pulso-icon.svg',
 ];
