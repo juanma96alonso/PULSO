@@ -2,7 +2,7 @@
   "name": "Pulso · App Fitness",
   "short_name": "Pulso",
   "description": "Tu app de fitness personal",
-  "start_url": "./pulso-fitness.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0e0b0a",
   "theme_color": "#0e0b0a",
