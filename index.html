@@ -116,6 +116,13 @@ const S = {
 
   getMealPlan:   ()  => S.get('pulso_meal_plan', DEFAULT_MEAL_PLAN),
   setMealPlan:   (p) => S.set('pulso_meal_plan', p),
+
+  getReps:       ()  => S.get('pulso_reps', {}),
+  setReps:       (r) => S.set('pulso_reps', r),
+
+  getTraining:   ()  => S.get('pulso_training', null),
+  setTraining:   (t) => S.set('pulso_training', t),
+  clearTraining: ()  => { try { localStorage.removeItem('pulso_training'); } catch {} },
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -195,10 +202,11 @@ const ONBOARDING_QS = [
 ═══════════════════════════════════════════════════════════════ */
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
-const today   = () => new Date().toISOString().slice(0,10);
-const fmtDate = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { day:'numeric', month:'short' });
-const fmtSecs = (s)  => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
-const uid     = ()   => Math.random().toString(36).slice(2,8);
+const today      = () => new Date().toISOString().slice(0,10);
+const fmtDate    = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('es-AR', { day:'numeric', month:'short' });
+const fmtSecs    = (s)   => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+const uid        = ()    => Math.random().toString(36).slice(2,8);
+const parseReps  = (r)   => { const m = String(r||'8').match(/\d+/); return m ? +m[0] : 8; };
 
 /* ═══════════════════════════════════════════════════════════════
    ICONS
@@ -545,14 +553,20 @@ function RutinaTab({ training, setTraining }) {
   const savePlan   = (p) => { setPlan_(p); S.setPlan(p); };
   const selDay     = plan.find(d=>d.id===selDayId) || plan[0] || null;
 
-  if (training) return (
-    <TrainingMode
-      routine={selDay?.exercises||[]}
-      dayLabel={selDay ? `Día ${selDay.letter}` : 'Entrenamiento'}
-      onExit={()=>setTraining(null)}
-      onSave={(updatedWeights, sessionRecord)=>{ S.setWeights(updatedWeights); S.addSession(sessionRecord); setTraining(null); }}
-    />
-  );
+  if (training) {
+    const savedState = S.getTraining();
+    const init = savedState?.dayId === selDay?.id ? savedState : null;
+    return (
+      <TrainingMode
+        routine={selDay?.exercises||[]}
+        dayLabel={selDay ? `Día ${selDay.letter}` : 'Entrenamiento'}
+        dayId={selDay?.id}
+        init={init}
+        onExit={()=>setTraining(null)}
+        onSave={(updatedWeights, sessionRecord)=>{ S.setWeights(updatedWeights); S.addSession(sessionRecord); setTraining(null); }}
+      />
+    );
+  }
 
   const updateDay = (dayId, updates) => savePlan(plan.map(d=>d.id===dayId?{...d,...updates}:d));
   const deleteDay = (dayId) => {
@@ -624,7 +638,19 @@ function RutinaTab({ training, setTraining }) {
                 <button onClick={()=>setEditDayId(selDay.id)} style={{ background:'transparent', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, fontFamily:'var(--sans)', display:'flex', alignItems:'center', gap:3, padding:0 }}><I.Edit sz={12}/>editar</button>
               </div>
             </div>
-            <Btn size="md" onClick={()=>setTraining(true)} icon={<I.Play sz={15}/>} style={{ width:'100%', marginTop:16 }}>Empezar entrenamiento</Btn>
+            {(() => {
+              const sv = S.getTraining();
+              const hasResume = sv?.dayId === selDay?.id;
+              return hasResume ? (
+                <div style={{ marginTop:16, display:'flex', flexDirection:'column', gap:8 }}>
+                  <div style={{ fontSize:12, color:'var(--accent)', display:'flex', alignItems:'center', gap:6 }}><I.Timer sz={13}/>Sesión pausada · podés retomar</div>
+                  <Btn size="md" onClick={()=>setTraining(true)} icon={<I.Play sz={15}/>} style={{ width:'100%' }}>Retomar sesión</Btn>
+                  <button onClick={()=>{ S.clearTraining(); setTraining(true); }} style={{ background:'transparent', border:'none', color:'var(--text-muted)', fontSize:12, cursor:'pointer', fontFamily:'var(--sans)', padding:'4px 0' }}>Empezar de nuevo</button>
+                </div>
+              ) : (
+                <Btn size="md" onClick={()=>setTraining(true)} icon={<I.Play sz={15}/>} style={{ width:'100%', marginTop:16 }}>Empezar entrenamiento</Btn>
+              );
+            })()}
           </Card>
         )}
 
@@ -853,73 +879,97 @@ function getExSets(exId, blocks, rounds) {
 /* ═══════════════════════════════════════════════════════════════
    TRAINING MODE
 ═══════════════════════════════════════════════════════════════ */
-function TrainingMode({ routine, dayLabel, onExit, onSave }) {
-  const savedWeights = S.getWeights();
-  const blocks  = useMemo(()=>buildBlocks(routine), []);
+function TrainingMode({ routine, dayLabel, dayId, init, onExit, onSave }) {
+  const blocks = useMemo(()=>buildBlocks(routine), []);
 
-  const [blockIdx, setBlockIdx] = useState(0);
-  const [subIdx,   setSubIdx]   = useState(0);   // position within superset
-  const [rounds,   setRounds]   = useState({});   // full rounds completed per block.id
-  const [wts,      setWts]      = useState(()=>Object.fromEntries(routine.map(e=>[e.id, savedWeights[e.id]??e.defaultWeight])));
-  const [timer,    setTimer]    = useState(null);
-  const [elapsed,  setEl]       = useState(0);
-  const [fin,      setFin]      = useState(false);
+  // Init from saved state or fresh
+  const [blockIdx,  setBlockIdx]  = useState(()=> init?.blockIdx  ?? 0);
+  const [subIdx,    setSubIdx]    = useState(()=> init?.subIdx    ?? 0);
+  const [rounds,    setRounds]    = useState(()=> init?.rounds    ?? {});
+  const [wts,       setWts]       = useState(()=> init?.wts       ?? Object.fromEntries(routine.map(e=>[e.id, S.getWeights()[e.id]??e.defaultWeight])));
+  const [reps,      setReps_]     = useState(()=> init?.reps      ?? Object.fromEntries(routine.map(e=>[e.id, S.getReps()[e.id]??parseReps(e.reps)])));
+  const [startedAt]               = useState(()=> init?.startedAt ?? Date.now());
+  const [restEndAt, setRestEndAt] = useState(()=> init?.restEndAt ?? null);
+  const [tick,      setTick]      = useState(0);
+  const [fin,       setFin]       = useState(false);
 
-  const block      = blocks[blockIdx];
-  const curEx      = block.exercises[subIdx];
-  const blockRnd   = rounds[block.id]||0;
-  const isSuperset = block.type === 'superset';
-  const isMidBlock = isSuperset && subIdx < block.exercises.length-1;
-  const blockDone  = blockRnd >= block.sets;
+  // Single interval drives both elapsed and rest timer — works when app comes back from background
+  useEffect(()=>{ const t=setInterval(()=>setTick(n=>n+1),500); return()=>clearInterval(t); },[]);
 
-  const totalRounds = blocks.reduce((a,b)=>a+b.sets,0);
-  const doneRounds  = blocks.reduce((a,b)=>a+(rounds[b.id]||0),0);
+  const elapsed   = Math.round((Date.now()-startedAt)/1000);
+  const timerLeft = restEndAt ? Math.max(0, Math.round((restEndAt-Date.now())/1000)) : 0;
 
-  useEffect(()=>{ const t=setInterval(()=>setEl(s=>s+1),1000); return()=>clearInterval(t); },[]);
-  useEffect(()=>{
-    if(!timer||timer.left<=0) return;
-    const t=setTimeout(()=>setTimer(tm=>tm?{...tm,left:tm.left-1}:null),1000);
-    return()=>clearTimeout(t);
-  },[timer]);
+  // Auto-clear expired rest
+  useEffect(()=>{ if(restEndAt && Date.now()>=restEndAt) setRestEndAt(null); },[tick]);
+
+  const safeBlockIdx = Math.min(blockIdx, blocks.length-1);
+  const block        = blocks[safeBlockIdx];
+  const curEx        = block?.exercises[Math.min(subIdx, block.exercises.length-1)];
+  const blockRnd     = rounds[block?.id]||0;
+  const isSuperset   = block?.type==='superset';
+  const isMidBlock   = isSuperset && subIdx < block.exercises.length-1;
+  const blockDone    = blockRnd >= (block?.sets||1);
+  const totalRounds  = blocks.reduce((a,b)=>a+b.sets,0);
+  const doneRounds   = blocks.reduce((a,b)=>a+(rounds[b.id]||0),0);
+
+  // Persist current state so session can be resumed
+  const persist = (ov={}) => S.setTraining({ dayId, blockIdx, subIdx, rounds, wts, reps, startedAt, restEndAt, ...ov });
 
   const completeStep = () => {
     if (isMidBlock) {
-      // Move to next exercise in superset — no rest
-      setSubIdx(s=>s+1);
+      const ns = subIdx+1;
+      setSubIdx(ns); persist({subIdx:ns});
     } else {
-      // Completed one full round of this block
-      const newRnd = (rounds[block.id]||0)+1;
-      setRounds(r=>({...r,[block.id]:newRnd}));
-      if (newRnd < block.sets) {
-        setTimer({left:block.restSec, total:block.restSec});
-        setSubIdx(0); // restart superset from first exercise
+      const nr = (rounds[block.id]||0)+1;
+      const newRounds = {...rounds,[block.id]:nr};
+      setRounds(newRounds);
+      if (nr < block.sets) {
+        const endAt = Date.now()+block.restSec*1000;
+        setRestEndAt(endAt); setSubIdx(0);
+        persist({rounds:newRounds, subIdx:0, restEndAt:endAt});
+      } else {
+        persist({rounds:newRounds});
       }
-      // if newRnd >= block.sets: show "Siguiente" (blockDone = true)
     }
   };
 
   const nextBlock = () => {
-    if (blockIdx < blocks.length-1) { setBlockIdx(b=>b+1); setSubIdx(0); setTimer(null); }
-    else setFin(true);
+    if (safeBlockIdx < blocks.length-1) {
+      const nb=safeBlockIdx+1;
+      setBlockIdx(nb); setSubIdx(0); setRestEndAt(null);
+      persist({blockIdx:nb, subIdx:0, restEndAt:null});
+    } else setFin(true);
   };
   const prevBlock = () => {
-    if (blockIdx > 0) { setBlockIdx(b=>b-1); setSubIdx(0); setTimer(null); }
+    if (safeBlockIdx>0) {
+      const nb=safeBlockIdx-1;
+      setBlockIdx(nb); setSubIdx(0); setRestEndAt(null);
+      persist({blockIdx:nb, subIdx:0, restEndAt:null});
+    }
   };
-  const adj = (d) => setWts(w=>({...w,[curEx.id]:Math.max(0,+((w[curEx.id]||0)+d).toFixed(2))}));
+
+  const adjWt  = (d) => setWts(w=>({...w,[curEx.id]:Math.max(0,+((w[curEx.id]||0)+d).toFixed(2))}));
+  const adjRep = (d) => setReps_(r=>({...r,[curEx.id]:Math.max(1,(r[curEx.id]||8)+d)}));
+
+  const saveAll = () => { S.setWeights(wts); S.setReps({...S.getReps(),...reps}); };
+
+  const handleExit = () => { persist(); saveAll(); onExit(); };
 
   const handleFinish = () => {
-    const session = { id:uid(), date:today(), duration:elapsed, exercises:routine.map(e=>({ id:e.id, name:e.name, sets:getExSets(e.id,blocks,rounds), weight:wts[e.id] })) };
+    S.clearTraining(); saveAll();
+    const session={ id:uid(), date:today(), duration:elapsed, exercises:routine.map(e=>({ id:e.id, name:e.name, sets:getExSets(e.id,blocks,rounds), weight:wts[e.id] })) };
     onSave(wts, session);
   };
 
+  if (!block||!curEx) return null;
   if (fin) return <TrainingDone elapsed={elapsed} done={doneRounds} total={totalRounds} onFinish={handleFinish}/>;
 
   return (
     <div style={{ position:'relative', height:'100%', background:'var(--bg)', display:'flex', flexDirection:'column' }}>
       <div style={{ height:56 }}/>
-      {/* ── header ── */}
+      {/* header */}
       <div style={{ padding:'4px 20px 10px', display:'flex', alignItems:'center', gap:10 }}>
-        <button onClick={onExit} style={{ width:34,height:34,borderRadius:999,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center' }}><I.X sz={16} st={2}/></button>
+        <button onClick={handleExit} style={{ width:34,height:34,borderRadius:999,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center' }}><I.ChevL sz={18} st={1.8}/></button>
         <div style={{ flex:1, textAlign:'center' }}>
           <div style={{ fontFamily:'var(--mono)', fontSize:10, color:'var(--text-muted)', letterSpacing:'0.14em', textTransform:'uppercase' }}>{dayLabel||'Entrenando'}</div>
           <div style={{ fontFamily:'var(--mono)', fontSize:14, color:'var(--text)', marginTop:2 }}>{fmtSecs(elapsed)}</div>
@@ -927,12 +977,11 @@ function TrainingMode({ routine, dayLabel, onExit, onSave }) {
         <div style={{ width:34,height:34 }}/>
       </div>
 
-      {/* ── progress bar by block ── */}
+      {/* progress by block */}
       <div style={{ padding:'0 20px 14px' }}>
         <div style={{ display:'flex', gap:4 }}>
           {blocks.map((b,i)=>{
-            const rnd = rounds[b.id]||0;
-            const pct = i < blockIdx ? 1 : i === blockIdx ? rnd/b.sets : 0;
+            const pct = i<safeBlockIdx ? 1 : i===safeBlockIdx ? (rounds[b.id]||0)/b.sets : 0;
             return (
               <div key={b.id} style={{ flex:1, height:3, borderRadius:999, background:'var(--surface-2)', position:'relative', overflow:'hidden' }}>
                 <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${pct*100}%`, background:'var(--accent)', transition:'width 320ms ease' }}/>
@@ -941,18 +990,16 @@ function TrainingMode({ routine, dayLabel, onExit, onSave }) {
           })}
         </div>
         <div style={{ display:'flex', justifyContent:'space-between', marginTop:8, fontSize:11, color:'var(--text-muted)' }}>
-          <span style={{ fontFamily:'var(--mono)' }}>Bloque {String(blockIdx+1).padStart(2,'0')} / {String(blocks.length).padStart(2,'0')}</span>
+          <span style={{ fontFamily:'var(--mono)' }}>Bloque {String(safeBlockIdx+1).padStart(2,'0')} / {String(blocks.length).padStart(2,'0')}</span>
           <span style={{ fontFamily:'var(--mono)' }}>{doneRounds}/{totalRounds} series</span>
         </div>
       </div>
 
-      {/* ── exercise content ── */}
+      {/* exercise content */}
       <div key={curEx.id+'-'+subIdx} style={{ flex:1, overflowY:'auto', padding:'0 20px 24px', animation:'fade-in 260ms ease both', WebkitOverflowScrolling:'touch' }}>
-
-        {/* Superset indicator */}
         {isSuperset && (
           <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
-            <div style={{ padding:'4px 12px', borderRadius:999, background:'var(--accent-dim)', color:'var(--accent)', fontSize:11.5, fontFamily:'var(--mono)', letterSpacing:'0.06em' }}>
+            <div style={{ padding:'4px 12px', borderRadius:999, background:'var(--accent-dim)', color:'var(--accent)', fontSize:11.5, fontFamily:'var(--mono)' }}>
               Superserie · {subIdx+1}/{block.exercises.length}
             </div>
             <div style={{ display:'flex', gap:4 }}>
@@ -967,6 +1014,7 @@ function TrainingMode({ routine, dayLabel, onExit, onSave }) {
         <div style={{ fontFamily:'var(--serif)', fontStyle:'italic', fontSize:34, lineHeight:1.05, marginTop:6, letterSpacing:'-0.02em' }}>{curEx.name}</div>
 
         <div style={{ marginTop:22, display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+          {/* Weight */}
           <div style={{ padding:18, borderRadius:20, background:'var(--surface)', border:'1px solid var(--border)' }}>
             <div style={{ fontSize:11, color:'var(--text-muted)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Peso</div>
             <div style={{ marginTop:6, display:'flex', alignItems:'baseline' }}>
@@ -975,38 +1023,39 @@ function TrainingMode({ routine, dayLabel, onExit, onSave }) {
             </div>
             <div style={{ display:'flex', gap:5, marginTop:12 }}>
               {[[-2.5,'−2.5'],[-1.25,'−1.25'],[1.25,'+1.25'],[2.5,'+2.5']].map(([d,l])=>(
-                <button key={l} onClick={()=>adj(d)} style={{ flex:1, padding:'6px 0', borderRadius:8, border:'none', background:d>0?'var(--accent-dim)':'var(--surface-2)', color:d>0?'var(--accent)':'var(--text-dim)', fontFamily:'var(--mono)', fontSize:10, fontWeight:500, cursor:'pointer' }}>{l}</button>
+                <button key={l} onClick={()=>adjWt(d)} style={{ flex:1, padding:'6px 0', borderRadius:8, border:'none', background:d>0?'var(--accent-dim)':'var(--surface-2)', color:d>0?'var(--accent)':'var(--text-dim)', fontFamily:'var(--mono)', fontSize:10, fontWeight:500, cursor:'pointer' }}>{l}</button>
               ))}
             </div>
           </div>
+          {/* Reps */}
           <div style={{ padding:18, borderRadius:20, background:'var(--surface)', border:'1px solid var(--border)' }}>
             <div style={{ fontSize:11, color:'var(--text-muted)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Reps</div>
-            <div style={{ marginTop:6, fontFamily:'var(--mono)', fontSize:38, fontWeight:500, letterSpacing:'-0.02em' }}>{curEx.reps}</div>
-            {isMidBlock
-              ? <div style={{ marginTop:12, fontSize:12, color:'var(--accent)', fontWeight:500, lineHeight:1.4 }}>→ sin descanso</div>
-              : <div style={{ marginTop:12, fontSize:12, color:'var(--text-dim)', lineHeight:1.4 }}>descanso {block.restSec}s</div>
-            }
+            <div style={{ marginTop:6, display:'flex', alignItems:'baseline' }}>
+              <div style={{ fontFamily:'var(--mono)', fontSize:38, fontWeight:500, letterSpacing:'-0.02em' }}>{reps[curEx.id]}</div>
+            </div>
+            <div style={{ display:'flex', gap:5, marginTop:12 }}>
+              {[[-2,'−2'],[-1,'−1'],[+1,'+1'],[+2,'+2']].map(([d,l])=>(
+                <button key={l} onClick={()=>adjRep(d)} style={{ flex:1, padding:'6px 0', borderRadius:8, border:'none', background:d>0?'var(--accent-dim)':'var(--surface-2)', color:d>0?'var(--accent)':'var(--text-dim)', fontFamily:'var(--mono)', fontSize:10, fontWeight:500, cursor:'pointer' }}>{l}</button>
+              ))}
+            </div>
           </div>
         </div>
+        <div style={{ marginTop:6, fontSize:11.5, color:'var(--text-muted)', textAlign:'right' }}>
+          meta: {curEx.reps} reps · {isMidBlock ? <span style={{ color:'var(--accent)' }}>→ sin descanso</span> : `descanso ${block.restSec}s`}
+        </div>
 
-        {/* Rounds / sets tracker */}
-        <div style={{ marginTop:20 }}>
+        {/* Sets / rounds tracker */}
+        <div style={{ marginTop:16 }}>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10 }}>
-            <div style={{ fontSize:12, color:'var(--text-dim)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase' }}>
-              {isSuperset ? 'Vueltas del bloque' : 'Series'}
-            </div>
+            <div style={{ fontSize:12, color:'var(--text-dim)', fontFamily:'var(--mono)', letterSpacing:'0.08em', textTransform:'uppercase' }}>{isSuperset?'Vueltas':'Series'}</div>
             <div style={{ fontFamily:'var(--mono)', fontSize:13 }}>{blockRnd}/{block.sets}</div>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             {Array.from({length:block.sets}).map((_,i)=>{
               const isDone=i<blockRnd, isCurr=i===blockRnd&&!blockDone;
               const label = isSuperset
-                ? (isDone ? block.exercises.map(e=>`${wts[e.id]}kg`).join(' + ')
-                   : isCurr ? `${block.exercises.length} ejercicios seguidos`
-                   : `${block.exercises.length} ejercicios`)
-                : (isDone ? `${wts[curEx.id]} kg · ${curEx.reps} reps`
-                   : isCurr ? 'Serie actual'
-                   : `${wts[curEx.id]} kg · ${curEx.reps} reps`);
+                ? (isDone?block.exercises.map(e=>`${wts[e.id]}kg`).join(' + '):isCurr?`${block.exercises.length} ejercicios seguidos`:`${block.exercises.length} ejercicios`)
+                : (isDone?`${wts[curEx.id]}kg · ${reps[curEx.id]} reps`:isCurr?'Serie actual':`${wts[curEx.id]}kg · ${reps[curEx.id]} reps`);
               return (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 14px', borderRadius:12, background:isCurr?'var(--accent-dim)':isDone?'rgba(127,166,122,.07)':'var(--surface)', border:`1px solid ${isCurr?'var(--accent)':isDone?'rgba(127,166,122,.18)':'var(--border)'}`, transition:'all 200ms' }}>
                   <div style={{ width:26, height:26, borderRadius:999, background:isDone?'var(--success)':isCurr?'var(--accent)':'var(--surface-2)', color:(isDone||isCurr)?'#0e0b0a':'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'var(--mono)', fontSize:12, fontWeight:600 }}>
@@ -1022,29 +1071,29 @@ function TrainingMode({ routine, dayLabel, onExit, onSave }) {
         <div style={{ height:90 }}/>
       </div>
 
-      {/* ── action buttons ── */}
+      {/* action buttons */}
       <div style={{ padding:'12px 20px 28px', background:'linear-gradient(180deg,transparent,var(--bg) 40%)', display:'flex', gap:8 }}>
-        <button onClick={prevBlock} disabled={blockIdx===0} style={{ width:56,height:56,borderRadius:18,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center',opacity:blockIdx===0?.4:1,cursor:blockIdx===0?'not-allowed':'pointer' }}><I.ChevL sz={20} st={2}/></button>
+        <button onClick={prevBlock} disabled={safeBlockIdx===0} style={{ width:56,height:56,borderRadius:18,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center',opacity:safeBlockIdx===0?.4:1,cursor:safeBlockIdx===0?'not-allowed':'pointer' }}><I.ChevL sz={20} st={2}/></button>
         {!blockDone
           ? (isMidBlock
               ? <Btn size="lg" onClick={completeStep} icon={<I.ChevR sz={18}/>} style={{ flex:1, background:'var(--surface-2)', color:'var(--text)' }}>Siguiente ejercicio</Btn>
               : <Btn size="lg" onClick={completeStep} icon={<I.Check sz={18} st={2.2}/>} style={{ flex:1 }}>Serie hecha</Btn>
             )
-          : <Btn size="lg" onClick={nextBlock} icon={<I.ChevR sz={18}/>} style={{ flex:1 }}>{blockIdx<blocks.length-1?'Siguiente':'Terminar'}</Btn>
+          : <Btn size="lg" onClick={nextBlock} icon={<I.ChevR sz={18}/>} style={{ flex:1 }}>{safeBlockIdx<blocks.length-1?'Siguiente':'Terminar'}</Btn>
         }
         <button onClick={nextBlock} style={{ width:56,height:56,borderRadius:18,background:'var(--surface)',border:'1px solid var(--border)',color:'var(--text-dim)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer' }}><I.ChevR sz={20} st={2}/></button>
       </div>
 
-      {timer&&timer.left>0&&<RestTimer timer={timer} onSkip={()=>setTimer(null)} onAdd={s=>setTimer(t=>t?{...t,left:t.left+s,total:t.total+s}:null)}/>}
+      {timerLeft>0&&<RestTimer left={timerLeft} total={block.restSec} onSkip={()=>setRestEndAt(null)} onAdd={s=>setRestEndAt(at=>(at||Date.now())+s*1000)}/>}
     </div>
   );
 }
 
-function RestTimer({ timer, onSkip, onAdd }) {
-  const m=Math.floor(timer.left/60), s=timer.left%60;
+function RestTimer({ left, total, onSkip, onAdd }) {
+  const m=Math.floor(left/60), s=left%60;
   return (
     <div style={{ position:'absolute', left:14, right:14, bottom:108, background:'rgba(34,29,26,.94)', backdropFilter:'blur(16px)', WebkitBackdropFilter:'blur(16px)', border:'1px solid rgba(217,119,87,.35)', borderRadius:22, padding:'14px 18px', display:'flex', alignItems:'center', gap:14, boxShadow:'0 20px 50px rgba(0,0,0,.5)', animation:'scale-in 320ms cubic-bezier(.2,.7,.2,1) both', zIndex:50 }}>
-      <CircleProg size={60} stroke={5} value={1-timer.left/timer.total} max={1}>
+      <CircleProg size={60} stroke={5} value={1-left/total} max={1}>
         <div style={{ fontFamily:'var(--mono)', fontSize:15, fontWeight:500 }}>{String(m).padStart(2,'0')}:{String(s).padStart(2,'0')}</div>
       </CircleProg>
       <div style={{ flex:1 }}>
