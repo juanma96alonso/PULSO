@@ -1,6 +1,7 @@
-const CACHE = 'pulso-v3';
+const CACHE = 'pulso-v4';
 
 const SHELL = [
+  './index.html',
   './pulso-manifest.json',
   './pulso-icon.svg',
 ];
