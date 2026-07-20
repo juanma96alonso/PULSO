@@ -907,6 +907,12 @@ function TrainingMode({ routine, dayLabel, dayId, init, onExit, onSave }) {
   const curEx        = block?.exercises[Math.min(subIdx, block.exercises.length-1)];
   const blockRnd     = rounds[block?.id]||0;
   const isSuperset   = block?.type==='superset';
+
+  const curWeight = curEx ? wts[curEx.id] : null;
+  const sessionsAtWeight = useMemo(()=>{
+    if (!curEx) return 0;
+    return S.getSessions().filter(s=>s.exercises?.some(e=>e.id===curEx.id && e.weight===curWeight)).length;
+  }, [curEx?.id, curWeight]);
   const isMidBlock   = isSuperset && subIdx < block.exercises.length-1;
   const blockDone    = blockRnd >= (block?.sets||1);
   const totalRounds  = blocks.reduce((a,b)=>a+b.sets,0);
@@ -938,7 +944,7 @@ function TrainingMode({ routine, dayLabel, dayId, init, onExit, onSave }) {
       const nb=safeBlockIdx+1;
       setBlockIdx(nb); setSubIdx(0); setRestEndAt(null);
       persist({blockIdx:nb, subIdx:0, restEndAt:null});
-    } else setFin(true);
+    } else { saveAll(); setFin(true); }
   };
   const prevBlock = () => {
     if (safeBlockIdx>0) {
@@ -948,7 +954,7 @@ function TrainingMode({ routine, dayLabel, dayId, init, onExit, onSave }) {
     }
   };
 
-  const adjWt  = (d) => setWts(w=>({...w,[curEx.id]:Math.max(0,+((w[curEx.id]||0)+d).toFixed(2))}));
+  const adjWt  = (d) => setWts(w=>{ const next={...w,[curEx.id]:Math.max(0,+((w[curEx.id]||0)+d).toFixed(2))}; S.setWeights(next); return next; });
   const adjRep = (d) => setReps_(r=>({...r,[curEx.id]:Math.max(1,(r[curEx.id]||8)+d)}));
 
   const saveAll = () => { S.setWeights(wts); S.setReps({...S.getReps(),...reps}); };
@@ -977,21 +983,29 @@ function TrainingMode({ routine, dayLabel, dayId, init, onExit, onSave }) {
         <div style={{ width:34,height:34 }}/>
       </div>
 
-      {/* progress by block */}
-      <div style={{ padding:'0 20px 14px' }}>
-        <div style={{ display:'flex', gap:4 }}>
+      {/* block nav chips — tappable to jump to any exercise */}
+      <div style={{ paddingBottom:10 }}>
+        <div style={{ display:'flex', gap:6, overflowX:'auto', padding:'0 20px', WebkitOverflowScrolling:'touch', scrollbarWidth:'none' }}>
           {blocks.map((b,i)=>{
-            const pct = i<safeBlockIdx ? 1 : i===safeBlockIdx ? (rounds[b.id]||0)/b.sets : 0;
+            const done = rounds[b.id]>=b.sets;
+            const curr = i===safeBlockIdx;
+            const label = b.exercises.map(e=>e.name.split(' ')[0]).join('+');
             return (
-              <div key={b.id} style={{ flex:1, height:3, borderRadius:999, background:'var(--surface-2)', position:'relative', overflow:'hidden' }}>
-                <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${pct*100}%`, background:'var(--accent)', transition:'width 320ms ease' }}/>
-              </div>
+              <button key={b.id}
+                onClick={()=>{ setBlockIdx(i); setSubIdx(0); setRestEndAt(null); persist({blockIdx:i,subIdx:0,restEndAt:null}); }}
+                style={{ flexShrink:0, display:'flex', alignItems:'center', gap:5, padding:'5px 12px', borderRadius:999,
+                  border:`1px solid ${curr?'var(--accent)':done?'rgba(127,166,122,.35)':'var(--border)'}`,
+                  background:curr?'var(--accent-dim)':done?'rgba(127,166,122,.08)':'transparent',
+                  color:curr?'var(--accent)':done?'var(--success)':'var(--text-muted)',
+                  fontFamily:'var(--mono)', fontSize:11, fontWeight:curr?600:400, cursor:'pointer', whiteSpace:'nowrap' }}>
+                {done && !curr && <I.Check sz={10} st={2.5} color="var(--success)"/>}
+                {label}
+              </button>
             );
           })}
         </div>
-        <div style={{ display:'flex', justifyContent:'space-between', marginTop:8, fontSize:11, color:'var(--text-muted)' }}>
-          <span style={{ fontFamily:'var(--mono)' }}>Bloque {String(safeBlockIdx+1).padStart(2,'0')} / {String(blocks.length).padStart(2,'0')}</span>
-          <span style={{ fontFamily:'var(--mono)' }}>{doneRounds}/{totalRounds} series</span>
+        <div style={{ display:'flex', justifyContent:'flex-end', padding:'6px 20px 0', fontSize:11, color:'var(--text-muted)', fontFamily:'var(--mono)' }}>
+          {doneRounds}/{totalRounds} series
         </div>
       </div>
 
@@ -1015,8 +1029,11 @@ function TrainingMode({ routine, dayLabel, dayId, init, onExit, onSave }) {
 
         <div style={{ marginTop:22, display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
           {/* Weight */}
-          <div style={{ padding:18, borderRadius:20, background:'var(--surface)', border:'1px solid var(--border)' }}>
+          <div style={{ padding:18, borderRadius:20, background:'var(--surface)', border:'1px solid var(--border)', position:'relative' }}>
             <div style={{ fontSize:11, color:'var(--text-muted)', letterSpacing:'0.08em', textTransform:'uppercase' }}>Peso</div>
+            {sessionsAtWeight>0 && (
+              <div style={{ position:'absolute', top:12, right:12, fontSize:10, fontFamily:'var(--mono)', color:'var(--accent)', background:'var(--accent-dim)', padding:'2px 7px', borderRadius:999 }}>{sessionsAtWeight}×</div>
+            )}
             <div style={{ marginTop:6, display:'flex', alignItems:'baseline' }}>
               <div style={{ fontFamily:'var(--mono)', fontSize:38, fontWeight:500, letterSpacing:'-0.02em' }}>{wts[curEx.id]}</div>
               <div style={{ marginLeft:4, fontSize:13, color:'var(--text-muted)' }}>kg</div>
